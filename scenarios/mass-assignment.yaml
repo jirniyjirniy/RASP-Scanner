@@ -1,0 +1,85 @@
+---
+# ── Метаданные ──
+id: mass-assignment-admin            # стабильный ключ сценария
+name: Mass Assignment — эскалация привилегий при регистрации
+description: >                       # что проверяем и чем это опасно
+  При регистрации в тело запроса добавляется служебное поле admin: true.
+  Если API принимает его как есть, любой пользователь может сам себе
+  выдать права администратора (Business Data Manipulation / privilege escalation).
+severity: critical                   # полный захват прав → критично
+wstg: WSTG-BUSL-01                   # Test Business Logic Data Validation (manipulation of business data)
+tags: [authz, mass-assignment, business-logic]   # для фильтрации запуска
+remediation: >                       # как исправить
+  Принимать при регистрации только разрешённые поля (allowlist),
+  поле admin выставлять только на сервере.
+
+# ── Роли ──
+roles:                               # логин ленивый: роль логинится при первом "as: <роль>"
+  user:                              # обычный пользователь, позитивный контроль
+    username: ${user_name}           # учётки из vars, потому что пользователя создаёт сам сценарий
+    password: ${password}
+  attacker:                          # пользователь, который пытается стать админом
+    username: ${attacker_name}
+    password: ${password}
+
+# ── Переменные ──
+vars:
+  user_name: user-${run_id}          # уникальные имена, чтобы повторный прогон не упал на дубликате
+  attacker_name: attacker-${run_id}
+  password: Passw0rd-${run_id}       # пароль одноразового тестового юзера, не секрет
+  admin: true                        # bool: Renderer обязан подставить его как true, а не как строку "true"
+
+# ── Шаги ──
+steps:
+  # Позитивный контроль: доказываем, что /me вообще отдаёт поле admin
+  # и у обычного юзера оно false. Без этого проверка атакующего ничего не значит.
+  - name: Регистрация обычного пользователя
+    type: setup                      # провал = ERROR: подготовка не удалась
+    request:                         # нет "as": регистрация анонимная, токен не нужен
+      method: POST
+      path: /users/v1/register
+      json:
+        username: ${user_name}
+        password: ${password}
+        email: ${user_name}@test.local
+    expect:
+      status: 200
+
+  - name: Обычный пользователь — не админ
+    type: setup                      # контроль: если упал, проверять атаку бессмысленно
+    as: user                         # первый "as: user" → Auth Manager логинит его здесь
+    request:
+      method: GET
+      path: /me
+    expect:
+      status: 200
+      json:
+        $.data.admin: false          # поле существует и по умолчанию false
+
+  # Атака: отправляем payload с лишним полем
+  - name: Регистрация с admin=true
+    type: setup                      # это доставка payload; ответ сам по себе ничего не доказывает
+    request:                         # провал = ERROR: юзер не создан, дальше проверять нечего
+      method: POST
+      path: /users/v1/register
+      json:
+        username: ${attacker_name}
+        password: ${password}
+        email: ${attacker_name}@test.local
+        admin: ${admin}              # то самое лишнее поле; подставится как bool
+    secure_if:
+      status: [400, 422]             # если падает с этим статусом, значит SECURE не ERROR
+    expect:
+      status: 200
+
+  # Вердикт выносит проверка состояния, а не ответ на регистрацию
+  - name: Атакующий не стал админом
+    type: attack                     # attack = шаг, чей провал означает VULNERABLE
+    as: attacker                     # ленивый логин атакующего
+    request:                         # безопасное поведение
+      method: GET
+      path: /me
+    expect:
+      status: 200
+      json:
+        $.data.admin: false          # если true → сервер принял admin из тела → уязвимость

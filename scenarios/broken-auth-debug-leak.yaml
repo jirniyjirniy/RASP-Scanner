@@ -1,0 +1,45 @@
+---
+# ── Метаданные ──
+id: broken-auth-debug-leak
+name: Утечка учёток через debug-эндпоинт → вход под админом
+description: >
+  Служебный эндпоинт /users/v1/_debug отдаёт всех пользователей вместе с
+  паролями и флагом admin (Excessive Data Exposure). Сценарий забирает учётку
+  администратора из этой выдачи и пытается залогиниться под ней — то есть
+  обходит аутентификацию, используя оставленный в проде отладочный код.
+severity: critical
+wstg: WSTG-ATHN-04                   # Testing for Bypassing Authentication Schema
+tags: [auth, info-exposure, debug]
+remediation: >
+  Убрать debug-эндпоинты из продакшена; никогда не возвращать пароли/хэши и
+  служебные флаги в ответах API.
+
+# ── Шаги ──
+steps:
+  - name: Debug-эндпоинт отдаёт учётки администраторов
+    type: setup                      # подготовка: достаём из утечки админские учётки
+    request:
+      method: GET
+      path: /users/v1/_debug
+    secure_if:
+      status: [401, 403, 404]        # эндпоинт закрыт/отсутствует → утечки нет → SECURE
+    save:
+      # забираем ВСЕХ, у кого admin == true, целыми объектами (нужны username+password)
+      admins:
+        from: users
+        where: {admin: true}
+        all: true                    # всегда список: работает ${admins.0.username}
+    expect:
+      status: 200                    # утечка доступна — продолжаем доказывать вред
+
+  - name: Вход под утёкшей учёткой администратора
+    type: attack                     # провал безопасного ожидания = VULNERABLE
+    request:                         # анонимный логин украденными из debug данными
+      method: POST
+      path: /users/v1/login
+      json:
+        username: ${admins.0.username}
+        password: ${admins.0.password}
+    expect:                          # БЕЗОПАСНОЕ поведение: такие данные не должны пускать
+      status: [401, 403]
+      body_not_contains: auth_token  # если выдали токен → вход удался → уязвимость

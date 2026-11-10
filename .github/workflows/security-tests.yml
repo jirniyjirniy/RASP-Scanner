@@ -1,0 +1,58 @@
+name: Security Tests (RASP-Scanner vs VAmPI)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+
+    # Стенд-мишень поднимается как service-контейнер рядом с джобой.
+    services:
+      vampi:
+        image: erev0s/vampi:latest
+        ports:
+          - 5000:5000
+
+    env:
+      TARGET_URL: http://localhost:5000
+      # Сид-учётки VAmPI для сценария idor-books (${env.*}).
+      USER_A_NAME: name1
+      USER_A_PASS: pass1
+      USER_B_NAME: name2
+      USER_B_PASS: pass2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Wait for VAmPI and seed DB
+        run: |
+          for i in $(seq 1 40); do curl -sf -o /dev/null "$TARGET_URL/" && break; sleep 1; done
+          curl -sf "$TARGET_URL/createdb" && echo " <- seeded"
+
+      - name: Run test suite (unit + integration)
+        run: uv run pytest -v
+
+      - name: Run security scan and build reports
+        # На заведомо уязвимом стенде ждём находок, поэтому не валим джобу
+        # (--fail-on never). Против реального API здесь был бы --fail-on vulnerable.
+        run: |
+          uv run rasp-scanner run \
+            --report-json reports/report.json \
+            --report-html reports/report.html \
+            --fail-on never
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: reports/

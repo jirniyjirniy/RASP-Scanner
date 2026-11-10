@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RASP-Scanner — отчёт {{ run.run_id }}</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1c2024; --muted: #697077; --line: #e3e6ea;
+    --secure: #1a7f52; --secure-bg: #e7f5ee;
+    --vuln: #c02626; --vuln-bg: #fdeaea;
+    --error: #b4690e; --error-bg: #fdf2e3;
+    --code-bg: #f3f4f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #15171a; --card: #1e2125; --ink: #e8eaed; --muted: #9aa2ab; --line: #2c3036;
+      --secure: #4ccb8e; --secure-bg: #16281f; --vuln: #ff7a7a; --vuln-bg: #2a1718;
+      --error: #e8ad5e; --error-bg: #2a2113; --code-bg: #15181c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+  .meta code { background: var(--code-bg); padding: 1px 6px; border-radius: 5px; color: var(--ink); }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 22px 0 28px; }
+  @media (max-width: 620px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .tile .n { font-size: 26px; font-weight: 700; }
+  .tile .l { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
+           text-transform: uppercase; letter-spacing: .03em; }
+  .v-secure { color: var(--secure); } .bg-secure { background: var(--secure-bg); color: var(--secure); }
+  .v-vulnerable { color: var(--vuln); } .bg-vulnerable { background: var(--vuln-bg); color: var(--vuln); }
+  .v-error { color: var(--error); } .bg-error { background: var(--error-bg); color: var(--error); }
+  .card { background: var(--card); border: 1px solid var(--line); border-left-width: 5px;
+          border-radius: 12px; padding: 18px 20px; margin-bottom: 16px; }
+  .card.verdict-vulnerable { border-left-color: var(--vuln); }
+  .card.verdict-secure { border-left-color: var(--secure); }
+  .card.verdict-error { border-left-color: var(--error); }
+  .card h2 { font-size: 16px; margin: 6px 0 4px; }
+  .tags { margin-top: 6px; }
+  .tag { display: inline-block; background: var(--code-bg); color: var(--muted); border-radius: 6px;
+         padding: 1px 8px; font-size: 12px; margin-right: 6px; }
+  .desc { color: var(--muted); font-size: 14px; margin: 8px 0; }
+  .rem { font-size: 13px; background: var(--code-bg); border-radius: 8px; padding: 8px 12px; margin-top: 8px; }
+  details.step { border-top: 1px solid var(--line); padding: 10px 0 2px; }
+  details.step > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 10px;
+                           font-size: 14px; }
+  details.step > summary::-webkit-details-marker { display: none; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .dot.passed, .dot.secure { background: var(--secure); }
+  .dot.vulnerable, .dot.error { background: var(--vuln); }
+  .dot.skipped { background: var(--muted); }
+  .step-type { font-size: 11px; color: var(--muted); text-transform: uppercase; border: 1px solid var(--line);
+               border-radius: 5px; padding: 0 5px; }
+  .io { margin: 8px 0 6px; }
+  .io .k { font-size: 12px; color: var(--muted); margin: 8px 0 2px; }
+  pre { background: var(--code-bg); border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 0;
+        font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  ul.checks { list-style: none; padding: 0; margin: 6px 0 2px; }
+  ul.checks li { font-size: 13px; padding: 2px 0; }
+  ul.checks li.ok::before { content: "✓ "; color: var(--secure); }
+  ul.checks li.no::before { content: "✗ "; color: var(--vuln); }
+  .err { color: var(--vuln); font-size: 13px; margin-top: 6px; }
+  footer { color: var(--muted); font-size: 12px; margin-top: 28px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>RASP-Scanner — отчёт о безопасности API</h1>
+  <div class="sub">Config-driven Security Test Runner · OWASP WSTG</div>
+  <div class="meta">
+    <span>Стенд: <code>{{ run.target }}</code></span>
+    <span>Прогон: <code>{{ run.run_id }}</code></span>
+    <span>{{ run.started_at }}</span>
+    <span class="badge bg-{{ run.verdict }}">Итог: {{ run.verdict }}</span>
+  </div>
+
+  <div class="tiles">
+    <div class="tile"><div class="n">{{ run.summary.total }}</div><div class="l">сценариев</div></div>
+    <div class="tile"><div class="n v-vulnerable">{{ run.summary.vulnerable }}</div><div class="l">уязвимо</div></div>
+    <div class="tile"><div class="n v-secure">{{ run.summary.secure }}</div><div class="l">безопасно</div></div>
+    <div class="tile"><div class="n v-error">{{ run.summary.error }}</div><div class="l">ошибок</div></div>
+  </div>
+
+  {% for s in run.scenarios %}
+  <div class="card verdict-{{ s.verdict }}">
+    <span class="badge bg-{{ s.verdict }}">{{ s.verdict }}</span>
+    <h2>{{ s.name }}</h2>
+    <div class="sub">{{ s.id }} · severity <b>{{ s.severity }}</b> · {{ s.wstg }}</div>
+    {% if s.tags %}<div class="tags">{% for t in s.tags %}<span class="tag">{{ t }}</span>{% endfor %}</div>{% endif %}
+    {% if s.description %}<div class="desc">{{ s.description }}</div>{% endif %}
+    {% if s.error %}<div class="err">Ошибка сценария: {{ s.error }}</div>{% endif %}
+
+    {% for st in s.steps %}
+    <details class="step" {% if st.outcome in ['vulnerable','error'] %}open{% endif %}>
+      <summary>
+        <span class="dot {{ st.outcome }}"></span>
+        <b>{{ st.name }}</b>
+        <span class="step-type">{{ st.type }}{% if st.as_role %} · as {{ st.as_role }}{% endif %}</span>
+        <span class="sub" style="margin-left:auto">{{ st.outcome }}</span>
+      </summary>
+      {% if st.request %}
+      <div class="io">
+        <div class="k">Запрос</div>
+        <pre>{{ st.request.method }} {{ st.request.url }}{% if st.request.json %}
+
+{{ st.request.json | tojson(indent=2) }}{% endif %}</pre>
+      </div>
+      {% endif %}
+      {% if st.response %}
+      <div class="io">
+        <div class="k">Ответ · {{ st.response.status_code }} · {{ st.response.elapsed_ms }} ms</div>
+        <pre>{{ st.response.body }}</pre>
+      </div>
+      {% endif %}
+      {% if st.checks %}
+      <ul class="checks">
+        {% for c in st.checks %}<li class="{{ 'ok' if c.passed else 'no' }}">{{ c.message }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      {% if st.error %}<div class="err">{{ st.error }}</div>{% endif %}
+    </details>
+    {% endfor %}
+
+    {% if s.remediation %}<div class="rem"><b>Как исправить:</b> {{ s.remediation }}</div>{% endif %}
+  </div>
+  {% endfor %}
+
+  <footer>Сгенерировано RASP-Scanner · {{ run.finished_at }}</footer>
+</div>
+</body>
+</html>
