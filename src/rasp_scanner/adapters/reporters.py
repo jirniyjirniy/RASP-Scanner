@@ -3,17 +3,39 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 from importlib.resources import files
 
 from jinja2 import Environment, select_autoescape
 
-from ..domain.enums import Verdict
+from ..domain.enums import Severity, Verdict
 from ..domain.results import RunResult
 from ..ports.reporting import AbstractReporter
 from . import serialization
 
-# символы-маркеры вердикта для консоли
-_MARK = {Verdict.SECURE: "✓ SECURE", Verdict.VULNERABLE: "✗ VULNERABLE", Verdict.ERROR: "! ERROR"}
+# текст и ANSI-коды вердикта (SGR): bold + цвет
+_VERDICT_TEXT = {Verdict.SECURE: "✓ SECURE", Verdict.VULNERABLE: "✗ VULNERABLE", Verdict.ERROR: "! ERROR"}
+_VERDICT_CODE = {Verdict.SECURE: "1;32", Verdict.VULNERABLE: "1;91", Verdict.ERROR: "1;33"}
+_SEVERITY_CODE = {
+    Severity.CRITICAL: "1;91", Severity.HIGH: "31", Severity.MEDIUM: "33",
+    Severity.LOW: "34", Severity.INFO: "90",
+}
+
+
+class _Painter:
+    """Оборачивает текст в SGR-коды, либо отдаёт как есть (когда цвет выключен)."""
+
+    def __init__(self, enabled: bool) -> None:
+        self.on = enabled
+
+    def __call__(self, text: str, codes: str) -> str:
+        return f"\x1b[{codes}m{text}\x1b[0m" if self.on else text
+
+
+def _should_color() -> bool:
+    # цвет только в настоящий терминал и если не выставлен NO_COLOR
+    return sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 
 
 class JsonReporter(AbstractReporter):
@@ -26,26 +48,37 @@ class JsonReporter(AbstractReporter):
 class ConsoleReporter(AbstractReporter):
     extension = "txt"
 
+    def __init__(self, color: bool | None = None) -> None:
+        # None → автоопределение по TTY; паддинг считаем по «голому» тексту до окраски
+        self._color = _should_color() if color is None else color
+
     def render(self, run: RunResult) -> str:
-        lines: list[str] = []
-        lines.append(f"Target : {run.target}")
-        lines.append(f"Run    : {run.run_id}")
-        lines.append("")
+        p = _Painter(self._color)
+        out: list[str] = []
+        out.append(p("Target", "1;2") + "   " + p(run.target, "36"))
+        out.append(p("Run", "1;2") + "      " + run.run_id)
+        out.append("")
+
         for s in run.scenarios:
-            lines.append(f"  {_MARK[s.verdict]:<14} [{s.severity.value:<8}] {s.wstg:<14} {s.id} — {s.name}")
+            mark = p(f"{_VERDICT_TEXT[s.verdict]:<12}", _VERDICT_CODE[s.verdict])
+            sev = p(f"[{s.severity.value:<8}]", _SEVERITY_CODE[s.severity])
+            out.append(f"  {mark}  {sev} " + p(f"{s.wstg:<14}", "36") + " " + p(s.id, "1") + f" — {s.name}")
             for st in s.steps:
                 for c in st.failed_checks:
-                    lines.append(f"       └─ {st.name}: {c.message}")
+                    out.append("       " + p("└─ ", "90") + p(f"{st.name}: ", "2") + c.message)
             if s.error:
-                lines.append(f"       └─ ERROR: {s.error}")
+                out.append("       " + p("└─ ERROR: ", "33") + s.error)
+
         summary = run.summary
-        lines.append("")
-        lines.append(
-            f"Summary: {summary['total']} scenarios — "
-            f"{summary['vulnerable']} vulnerable, {summary['secure']} secure, {summary['error']} error"
+        out.append("")
+        out.append(
+            p("Summary", "1;2") + f"  {summary['total']} scenarios — "
+            + p(f"{summary['vulnerable']} vulnerable", "91") + ", "
+            + p(f"{summary['secure']} secure", "32") + ", "
+            + p(f"{summary['error']} error", "33")
         )
-        lines.append(f"Verdict: {_MARK[run.verdict]}")
-        return "\n".join(lines)
+        out.append(p("Verdict", "1;2") + "  " + p(_VERDICT_TEXT[run.verdict], _VERDICT_CODE[run.verdict]))
+        return "\n".join(out)
 
 
 class HtmlReporter(AbstractReporter):

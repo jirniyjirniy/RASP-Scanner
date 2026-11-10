@@ -12,6 +12,7 @@ from typing import Optional
 
 import typer
 
+from ..adapters.reporters import ConsoleReporter
 from ..bootstrap import bootstrap, make_reporter
 from ..domain.enums import Verdict
 from ..domain.errors import ScannerError
@@ -31,8 +32,27 @@ class FailOn(str, enum.Enum):
     never = "never"             # всегда код 0 (отчёт-онли)
 
 
+class ColorWhen(str, enum.Enum):
+    auto = "auto"               # цвет только в терминал
+    always = "always"           # всегда (напр. для цветных логов CI)
+    never = "never"             # без цвета
+
+    def to_flag(self) -> bool | None:
+        return {"auto": None, "always": True, "never": False}[self.value]
+
+
 def _err(message: str) -> None:
     typer.secho(message, fg=typer.colors.RED, err=True)
+
+
+# цвет severity для list (Click сам снимет окраску при пайпе/редиректе)
+_SEVERITY_FG = {
+    "critical": typer.colors.BRIGHT_RED,
+    "high": typer.colors.RED,
+    "medium": typer.colors.YELLOW,
+    "low": typer.colors.BLUE,
+    "info": typer.colors.BRIGHT_BLACK,
+}
 
 
 @app.command()
@@ -45,6 +65,7 @@ def run(
     report_json: Optional[Path] = typer.Option(None, "--report-json", help="Куда сохранить JSON-отчёт."),
     report_html: Optional[Path] = typer.Option(None, "--report-html", help="Куда сохранить HTML-отчёт."),
     fail_on: FailOn = typer.Option(FailOn.vulnerable, "--fail-on", help="Когда возвращать ненулевой код для CI."),
+    color: ColorWhen = typer.Option(ColorWhen.auto, "--color", help="Цвет вывода: auto|always|never."),
 ) -> None:
     """Выполнить сценарии против стенда и сформировать отчёты."""
     try:
@@ -67,7 +88,8 @@ def run(
         env=app_ctx.env,
     )
 
-    typer.echo(make_reporter("console").render(result))
+    color_flag = color.to_flag()
+    typer.echo(ConsoleReporter(color=color_flag).render(result), color=color_flag)
 
     if report_json is not None:
         _write(report_json, make_reporter("json").render(result))
@@ -110,7 +132,10 @@ def list_scenarios(
 
     for s in scenarios:
         tags = f"  [{', '.join(s.tags)}]" if s.tags else ""
-        typer.echo(f"  {s.id:<28} {s.severity.value:<8} {s.wstg:<14} {s.name}{tags}")
+        sev = typer.style(f"{s.severity.value:<8}", fg=_SEVERITY_FG.get(s.severity.value), bold=s.severity.value == "critical")
+        sid = typer.style(f"{s.id:<28}", bold=True)
+        wstg = typer.style(f"{s.wstg:<14}", fg=typer.colors.CYAN)
+        typer.echo(f"  {sid} {sev} {wstg} {s.name}{tags}")
 
 
 def _write(path: Path, content: str) -> None:
