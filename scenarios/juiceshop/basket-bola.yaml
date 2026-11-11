@@ -1,0 +1,50 @@
+---
+# ── Метаданные ──
+id: juiceshop-basket-bola
+name: BOLA — чтение чужой корзины по id
+description: >
+  Эндпоинт /rest/basket/{id} берёт идентификатор корзины из URL и не проверяет,
+  что она принадлежит владельцу токена. Залогиненный атакующий читает корзину
+  другого пользователя (id=1 — корзина администратора), просто подставив чужой id
+  (Broken Object Level Authorization).
+severity: high
+wstg: WSTG-ATHZ-04                   # Testing for Insecure Direct Object References
+tags: [authz, bola, idor]
+remediation: >
+  Проверять, что владелец запрашиваемой корзины совпадает с субъектом токена;
+  не доверять id из URL для доступа к объекту.
+
+# ── Роли: вход по email (механика в configs/juiceshop.yaml) ──
+roles:
+  attacker:
+    email: ${attacker_email}
+    password: ${attacker_password}
+
+# ── Переменные: одноразовый атакующий на каждый прогон ──
+vars:
+  attacker_email: bola-${run_id}@test.local
+  attacker_password: Passw0rd-${run_id}
+  victim_basket: "1"                 # корзина администратора (сид-данные, стабильна)
+
+# ── Шаги ──
+steps:
+  - name: Регистрация атакующего
+    type: setup                      # подготовка: провал = ERROR, а не уязвимость
+    request:
+      method: POST
+      path: /api/Users
+      json:
+        email: ${attacker_email}
+        password: ${attacker_password}
+        passwordRepeat: ${attacker_password}
+    expect:
+      status: 201
+
+  - name: Атакующий читает чужую корзину (id=1)
+    type: attack                     # провал безопасного ожидания = VULNERABLE
+    as: attacker                     # ленивый логин атакующего под СВОЕЙ учёткой
+    request:
+      method: GET
+      path: /rest/basket/${victim_basket}
+    expect:                          # БЕЗОПАСНО: доступ к чужому объекту должен быть закрыт
+      status: [401, 403]             # 200 с чужой корзиной → объектный доступ не проверяется

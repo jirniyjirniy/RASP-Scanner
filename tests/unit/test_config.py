@@ -8,9 +8,11 @@ def test_defaults_target_and_login(monkeypatch):
     monkeypatch.delenv("TARGET_URL", raising=False)
     cfg = load_config()
     assert cfg.base_url.startswith("http")
+    assert cfg.auth.type == "login"
     assert cfg.auth.login.path == "/users/v1/login"
-    assert cfg.auth.login.token_path == "auth_token"
-    assert cfg.auth.inject.template == "Bearer ${token}"
+    assert cfg.auth.login.token.source == "json"
+    assert cfg.auth.login.token.path == "auth_token"
+    assert cfg.auth.inject[0].template == "Bearer ${token}"
 
 
 def test_explicit_target_wins_over_env(monkeypatch):
@@ -27,11 +29,11 @@ def test_env_target_used_when_no_explicit(monkeypatch):
 def test_yaml_config_file(tmp_path, monkeypatch):
     monkeypatch.delenv("TARGET_URL", raising=False)   # ambient env не должен перебивать файл
     f = tmp_path / "cfg.yaml"
-    f.write_text("target: http://box:9\ntimeout: 3\nauth:\n  login:\n    token_path: data.jwt\n")
+    f.write_text("target: http://box:9\ntimeout: 3\nauth:\n  login:\n    token:\n      path: data.jwt\n")
     cfg = load_config(f)
     assert cfg.base_url == "http://box:9"
     assert cfg.timeout == 3
-    assert cfg.auth.login.token_path == "data.jwt"
+    assert cfg.auth.login.token.path == "data.jwt"
 
 
 def test_missing_config_file_raises():

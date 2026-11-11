@@ -1,0 +1,31 @@
+---
+# Сценарий-шаблон под ТВОЙ API (репо А). Поправь пути/поля под своё приложение.
+# Справочник всех возможностей формата — scenario-reference.yaml в репо сканера.
+id: example-bola-own-resource
+name: Пример — доступ к чужому объекту (BOLA)
+description: >
+  Пользователь B запрашивает ресурс пользователя A по id. Если API отдаёт чужой
+  объект — проверка прав на уровне объекта не работает.
+severity: high
+wstg: WSTG-ATHZ-04
+tags: [authz, bola]
+remediation: Проверять, что владелец ресурса совпадает с субъектом токена.
+
+# Учётки берутся из секретов репозитория через ${env.*} (в workflow прокинуты в env).
+roles:
+  user_b:
+    email: ${env.USER_B_EMAIL}
+    password: ${env.API_PASS}
+
+vars:
+  victim_resource_id: "1"            # чужой ресурс (замени под свой стенд)
+
+steps:
+  - name: B запрашивает чужой ресурс
+    type: attack                     # провал безопасного ожидания = VULNERABLE
+    as: user_b
+    request:
+      method: GET
+      path: /api/resources/${victim_resource_id}
+    expect:                          # БЕЗОПАСНО: доступ к чужому объекту закрыт
+      status: [401, 403, 404]        # 200 с чужим объектом → BOLA

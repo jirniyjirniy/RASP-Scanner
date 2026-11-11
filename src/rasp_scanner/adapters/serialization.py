@@ -6,6 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
+from ..domain.http import RequestBody
 from ..domain.results import (
     CheckResult,
     RequestSnapshot,
@@ -24,16 +25,34 @@ def _val(x: Any) -> Any:
     return x
 
 
+def body_to_dict(b: RequestBody | None) -> dict | None:
+    if b is None:
+        return None
+    files = None
+    if b.files:
+        files = {
+            name: {"filename": f.filename, "content": f.content, "content_type": f.content_type}
+            for name, f in b.files.items()
+        }
+    return {"kind": _val(b.kind), "content": b.content, "files": files, "content_type": b.content_type}
+
+
 def request_to_dict(r: RequestSnapshot | None) -> dict | None:
     if r is None:
         return None
-    return {"method": r.method, "url": r.url, "headers": r.headers, "params": r.params, "json": r.json_body}
+    return {
+        "method": r.method, "url": r.url, "headers": r.headers, "params": r.params,
+        "body": body_to_dict(r.body), "cookies": r.cookies,
+    }
 
 
 def response_to_dict(r: ResponseSnapshot | None) -> dict | None:
     if r is None:
         return None
-    return {"status_code": r.status_code, "headers": r.headers, "body": r.body, "elapsed_ms": round(r.elapsed_ms, 1)}
+    return {
+        "status_code": r.status_code, "headers": r.headers, "body": r.body,
+        "elapsed_ms": round(r.elapsed_ms, 1), "cookies": r.cookies,
+    }
 
 
 def check_to_dict(c: CheckResult) -> dict:

@@ -17,10 +17,13 @@ from typing import Any
 from ..config import RunnerConfig
 from ..domain import assertions
 from ..domain.context import Context
+from ..domain.bodies import materialize
 from ..domain.enums import StepOutcome, StepType
 from ..domain.errors import ExtractionError, RenderError, ScannerError
 from ..domain.extraction import extract
 from ..domain.http import HttpRequest, HttpResponse
+from ..domain.redaction import REDACTED as _REDACTED
+from ..domain.redaction import Redactor, is_sensitive_key
 from ..domain.rendering import Renderer
 from ..domain.results import (
     RequestSnapshot,
@@ -34,7 +37,6 @@ from ..ports.clock import Clock
 from ..ports.http import HttpClient
 from .auth import AuthManager
 
-_REDACTED = "***redacted***"
 _SENSITIVE_HEADERS = {"authorization", "cookie", "set-cookie"}
 
 
@@ -63,12 +65,10 @@ class StepExecutor:
         except RenderError as exc:
             return self._error(step, start, f"подстановка ${{...}} не удалась: {exc}")
 
-        # 2. auth: ленивый логин + инъекция токена, если указан as
+        # 2. auth: ленивый логин + учётная декорация (заголовки/cookies/query), если указан as
         if step.as_role is not None:
             try:
-                auth_headers = self._auth.headers_for(step.as_role)
-                # явные заголовки шага перекрывают инъекцию (можно задать токен вручную)
-                request = self._with_headers(request, {**auth_headers, **request.headers})
+                request = self._auth.decorate(request, step.as_role)
             except ScannerError as exc:
                 return self._error(step, start, str(exc), request=request)
 
@@ -115,20 +115,12 @@ class StepExecutor:
         path = str(renderer.render(spec.path))
         headers = {k: str(v) for k, v in renderer.render(spec.headers).items()}
         params = renderer.render(spec.params)
-        json_body = renderer.render(spec.json_body) if spec.json_body is not None else None
         return HttpRequest(
             method=spec.method.value,
             url=f"{self._config.base_url}{path}",
             headers=headers,
             params=params,
-            json_body=json_body,
-        )
-
-    @staticmethod
-    def _with_headers(request: HttpRequest, headers: dict[str, str]) -> HttpRequest:
-        return HttpRequest(
-            method=request.method, url=request.url, headers=headers,
-            params=request.params, json_body=request.json_body,
+            body=materialize(spec.body_fields(), renderer),
         )
 
     def _apply_saves(
@@ -155,7 +147,7 @@ class StepExecutor:
         return RequestSnapshot(
             method=request.method, url=request.url,
             headers=_redact_headers(request.headers),
-            params=request.params, json_body=request.json_body,
+            params=request.params, body=request.body, cookies=request.cookies,
         )
 
     def _snapshot_response(self, response: HttpResponse) -> ResponseSnapshot:
@@ -165,7 +157,7 @@ class StepExecutor:
             body = body[:limit] + f"\n… (обрезано, всего {len(response.text)} символов)"
         return ResponseSnapshot(
             status_code=response.status_code, headers=dict(response.headers),
-            body=body, elapsed_ms=response.elapsed_ms,
+            body=body, elapsed_ms=response.elapsed_ms, cookies=response.cookies,
         )
 
     # ── фабрики StepResult ───────────────────────────────────────────────────
@@ -232,12 +224,40 @@ class ScenarioRunner:
                 stopped = True
 
         verdict = fold_steps(r.outcome for r in step_results)
-        return self._scenario_result(scenario, started, verdict, step_results)
+        result = self._scenario_result(scenario, started, verdict, step_results)
+        self._redact(result, scenario, context)
+        return result
 
     def _seed_vars(self, scenario: Scenario, context: Context) -> None:
         renderer = Renderer(context)
         for name, raw in scenario.vars.items():
             context.set(name, renderer.render(raw))
+
+    # ── редакция секретов перед отдачей репортёрам ──
+    def _redact(self, result: ScenarioResult, scenario: Scenario, context: Context) -> None:
+        """Вычищает пароли из снимков шагов и текста ошибки сценария (на месте)."""
+        redactor = Redactor(self._collect_secrets(scenario, context))
+        for step in result.steps:
+            redactor.scrub_step(step)
+        if result.error:
+            result.error = redactor.redact_text(result.error)
+
+    @staticmethod
+    def _collect_secrets(scenario: Scenario, context: Context) -> set[str]:
+        """«Свои» секреты прогона: пароли ролей + значения секретных vars."""
+        secrets: set[str] = set()
+        renderer = Renderer(context)
+        for role in scenario.roles.values():
+            try:
+                password = renderer.render(role.password)
+            except Exception:
+                continue  # роль с незаданным ${env...}: не использовалась — пропускаем
+            if isinstance(password, str) and password:
+                secrets.add(password)
+        for name, value in context.snapshot().items():
+            if is_sensitive_key(name) and isinstance(value, str) and value:
+                secrets.add(value)
+        return secrets
 
     def _scenario_result(self, scenario, started, verdict, steps) -> ScenarioResult:
         return ScenarioResult(

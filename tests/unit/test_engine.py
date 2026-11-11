@@ -124,7 +124,7 @@ def test_save_find_all_then_use_in_next_request():
     result, fake = run(scenario, router)
     assert result.verdict is Verdict.VULNERABLE          # логин вернул 200, а ждали отказ
     login_req = fake.sent_to("POST", "/users/v1/login")[-1]
-    assert login_req.json_body == {"username": "root", "password": "pr"}
+    assert login_req.body.content == {"username": "root", "password": "pr"}
 
 
 def test_extraction_failure_is_error():
@@ -198,5 +198,5 @@ def test_vars_rendered_from_run_id_and_env():
     }
     result, fake = run(scenario, router, env={"USER": "alice"})
     assert result.verdict is Verdict.SECURE
-    body = fake.sent_to("POST", "/echo")[0].json_body
+    body = fake.sent_to("POST", "/echo")[0].body.content
     assert body == {"title": "book-RID", "who": "alice"}

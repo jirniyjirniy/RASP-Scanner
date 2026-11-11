@@ -1,0 +1,112 @@
+name: "RASP-Scanner"
+description: "Config-driven security test runner (OWASP WSTG): прогоняет твои YAML-сценарии против таргета и отдаёт отчёт + код возврата для CI."
+author: "RASP-Scanner"
+branding:
+  icon: "shield"
+  color: "red"
+
+# Reusable composite action. Подключается из любого репозитория одной строкой:
+#   - uses: <owner>/RASP-Scanner@v1
+# Код этого action'а выполняется на раннере ВЫЗЫВАЮЩЕГО репозитория: скан бьёт по
+# его таргету, читает его сценарии, отчёт становится артефактом вызывающего репо.
+inputs:
+  target:
+    description: "Базовый URL приложения-мишени (перебивает TARGET_URL/конфиг)."
+    required: false
+    default: ""
+  scenarios-dir:
+    description: "Каталог со сценариями (*.yaml) в вызывающем репозитории."
+    required: false
+    default: "security/scenarios"
+  config:
+    description: "YAML-конфиг раннера (auth, timeout …). Пусто — дефолты."
+    required: false
+    default: ""
+  only:
+    description: "Запустить только эти id сценариев (через пробел)."
+    required: false
+    default: ""
+  tags:
+    description: "Только сценарии с пересечением по тегам (через пробел)."
+    required: false
+    default: ""
+  fail-on:
+    description: "Когда валить джобу: vulnerable | error | never."
+    required: false
+    default: "vulnerable"
+  report-dir:
+    description: "Куда сложить отчёты (report.json, report.html)."
+    required: false
+    default: "reports"
+  upload-artifact:
+    description: "Залить отчёты артефактом (true/false)."
+    required: false
+    default: "true"
+  artifact-name:
+    description: "Имя артефакта с отчётами."
+    required: false
+    default: "security-report"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+
+    - name: Run RASP-Scanner
+      shell: bash
+      # Входы прокидываем через env (а не прямой ${{ }} в скрипт) — это защищает
+      # от инъекции в shell через значения входов.
+      env:
+        RS_TARGET: ${{ inputs.target }}
+        RS_SCENARIOS: ${{ inputs.scenarios-dir }}
+        RS_CONFIG: ${{ inputs.config }}
+        RS_ONLY: ${{ inputs.only }}
+        RS_TAGS: ${{ inputs.tags }}
+        RS_FAILON: ${{ inputs.fail-on }}
+        RS_REPORTDIR: ${{ inputs.report-dir }}
+        RS_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$RS_REPORTDIR"
+        args=(run -d "$RS_SCENARIOS"
+              --report-json "$RS_REPORTDIR/report.json"
+              --report-html "$RS_REPORTDIR/report.html"
+              --fail-on "$RS_FAILON" --color never)
+        [ -n "$RS_TARGET" ] && args+=(--target "$RS_TARGET")
+        [ -n "$RS_CONFIG" ] && args+=(-c "$RS_CONFIG")
+        for id in $RS_ONLY; do args+=(--only "$id"); done
+        for t in $RS_TAGS; do args+=(--tags "$t"); done
+        # Движок ставится и запускается из кода ЭТОГО action'а ($GITHUB_ACTION_PATH),
+        # без публикации в PyPI. uv сам подтянет нужный Python и зависимости.
+        uvx --from "$RS_ACTION_PATH" rasp-scanner "${args[@]}"
+
+    - name: Report summary
+      if: ${{ always() }}
+      shell: bash
+      env:
+        RS_REPORTDIR: ${{ inputs.report-dir }}
+      run: |
+        set -euo pipefail
+        f="$RS_REPORTDIR/report.json"
+        [ -f "$f" ] || { echo "отчёт не сформирован"; exit 0; }
+        python3 - "$f" >> "$GITHUB_STEP_SUMMARY" <<'PY'
+        import json, sys
+        r = json.load(open(sys.argv[1]))
+        s = r["summary"]; mark = {"vulnerable": "❌", "secure": "✅", "error": "⚠️"}
+        print(f"## RASP-Scanner — {r['verdict'].upper()}")
+        print(f"\nTarget `{r['target']}` · {s['total']} сценариев · "
+              f"**{s['vulnerable']} vulnerable**, {s['secure']} secure, {s['error']} error\n")
+        print("| | Severity | WSTG | Сценарий |")
+        print("|---|---|---|---|")
+        for sc in r["scenarios"]:
+            print(f"| {mark.get(sc['verdict'],'')} {sc['verdict']} | {sc['severity']} "
+                  f"| {sc['wstg']} | {sc['name']} |")
+        PY
+
+    - name: Upload report
+      if: ${{ always() && inputs.upload-artifact == 'true' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.report-dir }}

@@ -1,0 +1,49 @@
+name: Security Scan
+
+# Пример workflow для ТВОЕГО репозитория (репо А).
+# Заменить <owner>/RASP-Scanner на реальный путь к репо сканера (репо Б) и
+# зафиксировать тег (@v1). Сценарии и конфиг лежат здесь же, в security/.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # ── Вариант 1: приложение-мишень поднимается ПРЯМО В ДЖОБЕ ──
+  # Самодостаточно: ничего внешнего не нужно. Хорош для не слишком тяжёлых приложений.
+  scan-local:
+    runs-on: ubuntu-latest
+    services:
+      app:
+        image: ghcr.io/your-org/your-app:latest   # образ твоего приложения
+        ports: ["8080:8080"]
+    env:
+      # Секреты репозитория → env → ${env.API_PASS} в сценарии/конфиге.
+      API_PASS: ${{ secrets.API_PASS }}
+    steps:
+      - uses: actions/checkout@v4                  # нужен, чтобы раннер увидел security/*
+      - name: Wait for app
+        run: for i in $(seq 1 60); do curl -sf -o /dev/null http://localhost:8080/ && break; sleep 1; done
+      - uses: <owner>/RASP-Scanner@v1
+        with:
+          target: http://localhost:8080
+          scenarios-dir: security/scenarios
+          config: security/config.yaml
+          fail-on: vulnerable                      # найдена дыра → джоба красная, merge заблокирован
+
+  # ── Вариант 2: сканируем УЖЕ РАЗВЁРНУТЫЙ stage/preview-URL ──
+  # Для тяжёлых приложений, которые не поднять в CI. Запускать, напр., после деплоя.
+  scan-staging:
+    runs-on: ubuntu-latest
+    # if: github.ref == 'refs/heads/main'          # напр. только после мержа в main
+    env:
+      API_PASS: ${{ secrets.STAGING_API_PASS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: <owner>/RASP-Scanner@v1
+        with:
+          target: ${{ vars.STAGING_URL }}          # напр. https://staging.example.com
+          scenarios-dir: security/scenarios
+          config: security/config.yaml
+          fail-on: vulnerable

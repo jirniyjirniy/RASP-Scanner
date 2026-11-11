@@ -82,10 +82,20 @@ steps:
         Authorization: "Bearer ${stolen_token}"
       params:                     # необязательно. Query-параметры (?a=1&b=2).
         q: test
-      json:                       # тело запроса YAML-словарём (не строкой!).
+      # --- Тело: ровно ОДНО из json/form/raw/multipart (иначе ошибка валидации) ---
+      json:                       # application/json — тело YAML-словарём (не строкой!).
         book_title: ${book}       # подстановка переменной
         secret: ${secret}
         admin: ${admin}           # уйдёт как bool true, т.к. значение = одна переменная
+      # form:                     # application/x-www-form-urlencoded
+      #   username: ${u}
+      #   password: ${p}
+      # raw: "<xml>${secret}</xml>"      # сырое тело строкой (XML/GraphQL/SOAP/...)
+      # content_type: application/xml    # Content-Type для raw (для остальных ставится сам)
+      # multipart:                # multipart/form-data: поля...
+      #   field: ${v}
+      # files:                    # ...и файлы (только вместе с multipart)
+      #   avatar: { filename: a.png, content: "${data}", content_type: image/png }
 
     # --- Сохранение значений из ответа (Extractors) ---
     # Выполняется ДО expect, чтобы проверки могли опираться на сохранённое.

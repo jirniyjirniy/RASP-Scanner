@@ -31,6 +31,14 @@ class StepType(str, Enum):
     ATTACK = "attack"    # провал expect → VULNERABLE, успех → SECURE
 
 
+class BodyKind(str, Enum):
+    """Способ кодирования тела запроса (и тела логина)."""
+    JSON = "json"            # application/json
+    FORM = "form"            # application/x-www-form-urlencoded
+    MULTIPART = "multipart"  # multipart/form-data (поля + файлы)
+    RAW = "raw"              # сырое тело строкой + явный Content-Type
+
+
 # ── Результатные (язык вердиктов движка) ─────────────────────────────────────
 class StepOutcome(str, Enum):
     """Чем закончился конкретный шаг."""

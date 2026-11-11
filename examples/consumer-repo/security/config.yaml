@@ -1,0 +1,21 @@
+# Механика входа для ТВОЕГО приложения (репо А). Полная схема с комментариями —
+# в config.example.yaml репозитория сканера. target здесь перебивается входом
+# `target:` из workflow, поэтому можно не указывать.
+
+auth:
+  type: login
+  login:
+    method: POST
+    path: /api/login                 # endpoint логина твоего приложения
+    body:
+      type: json                     # json | form | raw | multipart
+      fields:
+        email: ${email}              # идентификатор роли (см. roles в сценарии)
+        password: ${password}
+    token:
+      source: json                   # json | header | cookie | regex
+      path: token                    # где в ответе лежит токен
+  inject:
+    - into: header
+      name: Authorization
+      template: "Bearer ${token}"

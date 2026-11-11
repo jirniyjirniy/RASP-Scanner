@@ -1,0 +1,65 @@
+---
+# ── Метаданные ──
+id: juiceshop-review-edit-bola
+name: BOLA — правка чужого отзыва по id
+description: >
+  Эндпоинт PATCH /rest/products/reviews меняет отзыв по его _id и не проверяет,
+  что автор отзыва совпадает с текущим пользователем. Атакующий берёт _id чужого
+  отзыва (из публичного списка) и переписывает его — изменение чужого объекта по
+  идентификатору (Broken Object Level Authorization).
+severity: high
+wstg: WSTG-ATHZ-04                   # Insecure Direct Object References
+tags: [authz, bola, tampering]
+remediation: >
+  Проверять, что автор отзыва совпадает с субъектом токена; не доверять _id из
+  тела запроса для доступа к объекту.
+
+# ── Роли: вход по email (механика в configs/juiceshop.yaml) ──
+roles:
+  attacker:
+    email: ${attacker_email}
+    password: ${attacker_password}
+
+# ── Переменные: одноразовый атакующий на каждый прогон ──
+vars:
+  attacker_email: rev-${run_id}@test.local
+  attacker_password: Passw0rd-${run_id}
+
+# ── Шаги ──
+steps:
+  - name: Регистрация атакующего
+    type: setup
+    request:
+      method: POST
+      path: /api/Users
+      json:
+        email: ${attacker_email}
+        password: ${attacker_password}
+        passwordRepeat: ${attacker_password}
+    expect:
+      status: 201
+
+  - name: Берём _id чужого отзыва из публичного списка
+    type: setup                      # подготовка: нет отзыва → ERROR, а не уязвимость
+    request:
+      method: GET
+      path: /rest/products/1/reviews
+    save:
+      review_id: data.0._id          # _id первого отзыва (его автор — admin@juice-sh.op)
+    expect:
+      status: 200
+
+  - name: Атакующий переписывает чужой отзыв
+    type: attack                     # провал безопасного ожидания = VULNERABLE
+    as: attacker
+    request:
+      method: PATCH
+      path: /rest/products/reviews
+      json:
+        id: ${review_id}
+        message: tampered-${run_id}
+    secure_if:
+      status: [401, 403]             # сервер запретил правку чужого объекта → SECURE, стоп
+    expect:                          # БЕЗОПАСНО: изменений быть не должно
+      json:
+        $.modified: 0               # modified=1 → чужой отзыв переписан → уязвимость

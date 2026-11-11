@@ -15,10 +15,16 @@ from rasp_scanner.ports.clock import Clock, RunIdProvider
 from rasp_scanner.ports.http import HttpClient
 
 
-def make_response(status: int = 200, *, json=None, text: str | None = None) -> HttpResponse:
+def make_response(
+    status: int = 200, *, json=None, text: str | None = None,
+    headers: dict | None = None, cookies: dict | None = None,
+) -> HttpResponse:
     if text is None:
         text = _json.dumps(json) if json is not None else ""
-    return HttpResponse(status_code=status, headers={"content-type": "application/json"}, text=text)
+    hdrs = {"content-type": "application/json"}
+    if headers:
+        hdrs.update(headers)
+    return HttpResponse(status_code=status, headers=hdrs, text=text, cookies=cookies or {})
 
 
 class FakeHttpClient(HttpClient):

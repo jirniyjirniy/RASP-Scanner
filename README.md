@@ -186,13 +186,33 @@ uv run rasp-scanner list                                  # список сце�
 
 Выбор стенда: `--target http://host:port`, либо `TARGET_URL`, либо `--config config.example.yaml`.
 
+### Свой сайт, а не VAmPI
+
+Сканер не прибит к VAmPI — меняется только `--config` (механика стенда), сценарии пишутся
+под API цели. Поддержано «из коробки»:
+
+- **Тело запроса любого типа** в шаге: `json`, `form` (urlencoded), `raw` (+ `content_type`,
+  для XML/GraphQL/SOAP), `multipart` + `files`. См. `scenario-reference.yaml`.
+- **Гибкая авторизация** в конфиге (`auth.type`): `login` (тело логина любого типа; токен из
+  JSON-тела / заголовка / cookie / regex; опц. `session`-cookies), `static` (API-key/токен из
+  env), `basic` (HTTP Basic из учётки роли), `none`; плюс опциональный **CSRF pre-flow**.
+  Подстановка учётки — `inject` в заголовок/cookie/query. Полная схема с комментариями —
+  в `config.example.yaml`.
+
+Готовый пример под чужой стенд (OWASP Juice Shop) — `configs/juiceshop.yaml`:
+
+```bash
+docker run --rm -p 3000:3000 bkimminich/juice-shop
+uv run rasp-scanner run -c configs/juiceshop.yaml -d scenarios/juiceshop
+```
+
 **Код возврата** (для CI): `--fail-on vulnerable` (по умолчанию) → `1` при находке,
 `2` при ошибке; `--fail-on error` → падать только на ошибках; `--fail-on never` → всегда `0`.
 
 ## 7. Отчёты
 
 - **Console** — краткая сводка с проваленными проверками (всегда в stdout).
-- **JSON** (`--report-json`) — машиночитаемый: запросы/ответы, проверки, вердикт, WSTG, remediation. Токены в заголовках **редактируются** (`***redacted***`).
+- **JSON** (`--report-json`) — машиночитаемый: запросы/ответы, проверки, вердикт, WSTG, remediation. Секреты **редактируются** (`***redacted***`): пароли в телах/`saved`/текстах, значения cookie, чувствительные заголовки (`Authorization`, `Set-Cookie`).
 - **HTML** (`--report-html`) — автономная страница (light/dark), карточки по вердикту, разворачиваемые шаги с запросом/ответом и чек-листом.
 
 ## 8. Тесты

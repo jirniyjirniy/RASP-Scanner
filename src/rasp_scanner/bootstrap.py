@@ -42,7 +42,11 @@ def bootstrap(
     config = load_config(config_path, target=target)
     repository = YamlScenarioRepository(scenarios_dir)
     uow = RunUnitOfWork(
-        lambda: HttpxClient(timeout=config.timeout, verify_tls=config.verify_tls)
+        lambda: HttpxClient(
+            timeout=config.timeout,
+            verify_tls=config.verify_tls,
+            follow_redirects=config.follow_redirects,
+        )
     )
     return AppContext(
         config=config,

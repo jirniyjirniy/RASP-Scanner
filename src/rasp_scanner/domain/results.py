@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any
 
 from .enums import Severity, StepOutcome, StepType, Verdict
+from .http import RequestBody
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,7 +29,8 @@ class RequestSnapshot:
     url: str
     headers: dict[str, str] = field(default_factory=dict)
     params: dict[str, Any] = field(default_factory=dict)
-    json_body: Any | None = None
+    body: RequestBody | None = None
+    cookies: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +39,7 @@ class ResponseSnapshot:
     headers: dict[str, str] = field(default_factory=dict)
     body: str = ""
     elapsed_ms: float = 0.0
+    cookies: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

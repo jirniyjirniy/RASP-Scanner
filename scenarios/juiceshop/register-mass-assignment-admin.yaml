@@ -1,0 +1,39 @@
+---
+# ── Метаданные ──
+id: juiceshop-mass-assignment-admin
+name: Mass Assignment — регистрация сразу админом
+description: >
+  Регистрация принимает тело как есть и позволяет задать служебное поле role.
+  Обычный пользователь при самостоятельной регистрации передаёт role=admin и
+  получает администраторскую учётку (Mass Assignment / Excessive Binding).
+  Вред доказывается по роли в ответе регистрации, а не по коду статуса.
+severity: critical
+wstg: WSTG-BUSL-01                   # Test Business Logic Data Validation
+tags: [mass-assignment, authz, privilege-escalation]
+remediation: >
+  Привязывать только разрешённые поля (allow-list); role/isAdmin назначать на
+  сервере, а не из тела запроса.
+
+# ── Переменные: одноразовый юзер на каждый прогон ──
+vars:
+  attacker_email: ma-${run_id}@test.local
+  attacker_password: Passw0rd-${run_id}
+
+# ── Шаги ──
+steps:
+  - name: Регистрация с подброшенным role=admin
+    type: attack                     # провал безопасного ожидания = VULNERABLE
+    request:
+      method: POST
+      path: /api/Users
+      json:
+        email: ${attacker_email}
+        password: ${attacker_password}
+        passwordRepeat: ${attacker_password}
+        role: admin                  # служебное поле, которого быть не должно
+    secure_if:
+      status: [400, 422]             # сервер отверг лишнее поле → защита сработала, стоп
+    expect:                          # БЕЗОПАСНО: сервер игнорирует role и ставит customer
+      status: 201
+      json:
+        $.data.role: customer        # если вернулось admin → привилегия назначена → уязвимость

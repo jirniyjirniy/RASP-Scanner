@@ -1,0 +1,29 @@
+# ============================================================================
+#  Пример конфига под ЧУЖОЙ стенд — OWASP Juice Shop (не VAmPI).
+#  Поднять:  docker run --rm -p 3000:3000 bkimminich/juice-shop
+#  Запуск:   rasp-scanner run -c configs/juiceshop.yaml -d scenarios/juiceshop
+#
+#  Показывает переносимость: сценарии те же, меняется только механика входа.
+#  Роли в сценариях для Juice Shop задают email (а не username), т.к. вход по email.
+# ============================================================================
+
+target: http://localhost:3000
+follow_redirects: true
+
+auth:
+  type: login
+  login:
+    method: POST
+    path: /rest/user/login            # endpoint логина Juice Shop
+    body:
+      type: json
+      fields:
+        email: ${email}               # Juice Shop логинит по email
+        password: ${password}
+    token:
+      source: json
+      path: authentication.token      # токен лежит в authentication.token
+  inject:
+    - into: header
+      name: Authorization
+      template: "Bearer ${token}"

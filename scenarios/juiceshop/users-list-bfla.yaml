@@ -1,0 +1,48 @@
+---
+# ── Метаданные ──
+id: juiceshop-users-list-bfla
+name: BFLA — список всех пользователей под обычной учёткой
+description: >
+  Админская функция GET /api/Users доступна любому аутентифицированному
+  пользователю: обычный юзер получает полный список учёток — с email, ролями и
+  хэшами паролей (Broken Function Level Authorization + Excessive Data Exposure).
+severity: high
+wstg: WSTG-ATHZ-02                   # Testing for Bypassing Authorization Schema
+tags: [authz, bfla, info-exposure]
+remediation: >
+  Ограничить /api/Users ролью админа (проверка на сервере); не возвращать
+  хэши паролей и служебные поля в ответах API.
+
+# ── Роли: вход по email (механика в configs/juiceshop.yaml) ──
+roles:
+  attacker:
+    email: ${attacker_email}
+    password: ${attacker_password}
+
+# ── Переменные: одноразовый атакующий на каждый прогон ──
+vars:
+  attacker_email: bfla-${run_id}@test.local
+  attacker_password: Passw0rd-${run_id}
+
+# ── Шаги ──
+steps:
+  - name: Регистрация обычного пользователя
+    type: setup
+    request:
+      method: POST
+      path: /api/Users
+      json:
+        email: ${attacker_email}
+        password: ${attacker_password}
+        passwordRepeat: ${attacker_password}
+    expect:
+      status: 201
+
+  - name: Обычный юзер запрашивает список всех учёток
+    type: attack                     # провал безопасного ожидания = VULNERABLE
+    as: attacker
+    request:
+      method: GET
+      path: /api/Users
+    expect:                          # БЕЗОПАСНО: админская функция закрыта для обычного юзера
+      status: [401, 403]             # 200 со списком учёток → функция не ограничена по роли

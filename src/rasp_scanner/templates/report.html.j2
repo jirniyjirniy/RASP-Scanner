@@ -107,10 +107,12 @@
       </summary>
       {% if st.request %}
       <div class="io">
-        <div class="k">Запрос</div>
-        <pre>{{ st.request.method }} {{ st.request.url }}{% if st.request.json %}
+        <div class="k">Запрос{% if st.request.body %} · тело: {{ st.request.body.kind }}{% if st.request.body.content_type %} ({{ st.request.body.content_type }}){% endif %}{% endif %}</div>
+        <pre>{{ st.request.method }} {{ st.request.url }}{% if st.request.cookies %}
+cookies: {{ st.request.cookies | tojson }}{% endif %}{% if st.request.body %}
 
-{{ st.request.json | tojson(indent=2) }}{% endif %}</pre>
+{% if st.request.body.kind == 'raw' %}{{ st.request.body.content }}{% else %}{{ st.request.body.content | tojson(indent=2) }}{% endif %}{% if st.request.body.files %}
+files: {{ st.request.body.files | tojson(indent=2) }}{% endif %}{% endif %}</pre>
       </div>
       {% endif %}
       {% if st.response %}

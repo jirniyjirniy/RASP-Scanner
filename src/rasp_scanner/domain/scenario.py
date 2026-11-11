@@ -13,7 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .enums import HttpMethod, Severity, StepType
+from .enums import BodyKind, HttpMethod, Severity, StepType
 
 # Формат идентификатора OWASP WSTG: WSTG-<КАТЕГОРИЯ>-<НОМЕР>, напр. WSTG-ATHZ-04
 WSTG_PATTERN = re.compile(r"^WSTG-[A-Z]+-\d+$")
@@ -80,6 +80,15 @@ class Expect(BaseModel):
         return v if isinstance(v, list) else [v]
 
 
+# ── Файл для multipart-тела (значения — шаблоны ${...}) ──
+class FileSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    filename: str
+    content: str = ""
+    content_type: str | None = None
+
+
 # ── Запрос ──
 class Request(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -88,7 +97,42 @@ class Request(BaseModel):
     path: str                             # только путь, базовый адрес из --target
     headers: dict[str, str] = {}
     params: dict[str, Any] = {}           # query-параметры
-    json_body: dict[str, Any] | None = Field(default=None, alias="json")    # тело
+
+    # ── тело: ровно одно из json/form/multipart/raw (валидатор следит) ──
+    json_body: Any | None = Field(default=None, alias="json")    # application/json
+    form: dict[str, Any] | None = None                           # x-www-form-urlencoded
+    multipart: dict[str, Any] | None = None                      # multipart-поля
+    files: dict[str, FileSpec] | None = None                     # multipart-файлы
+    raw: str | None = None                                       # сырое тело строкой
+    content_type: str | None = None                              # Content-Type для raw
+
+    @model_validator(mode="after")
+    def exactly_one_body(self):
+        chosen = [
+            name for name, val in (
+                ("json", self.json_body), ("form", self.form),
+                ("multipart", self.multipart), ("raw", self.raw),
+            ) if val is not None
+        ]
+        if len(chosen) > 1:
+            raise ValueError(f"в запросе можно задать только одно тело, а заданы: {', '.join(chosen)}")
+        if self.files is not None and self.multipart is None:
+            raise ValueError("files указываются вместе с multipart")
+        if self.content_type is not None and self.raw is None:
+            raise ValueError("content_type относится к raw-телу")
+        return self
+
+    def body_fields(self) -> tuple[BodyKind, Any, dict[str, FileSpec] | None, str | None] | None:
+        """Выбранное тело в неотрендеренном виде: (kind, content, files, content_type)."""
+        if self.json_body is not None:
+            return (BodyKind.JSON, self.json_body, None, None)
+        if self.form is not None:
+            return (BodyKind.FORM, self.form, None, None)
+        if self.multipart is not None:
+            return (BodyKind.MULTIPART, self.multipart, self.files, None)
+        if self.raw is not None:
+            return (BodyKind.RAW, self.raw, None, self.content_type)
+        return None
 
 
 # ── Шаг ──
